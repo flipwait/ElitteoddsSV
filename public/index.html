@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EliteOdds Board v3.13.6</title>
+  <title>EliteOdds Board v3.13.7</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -3454,18 +3454,8 @@
                   <option value="all">All ranks</option>
                 </select>
               </div>
-              <div>
-                <label style="display:block;font-size:9px;color:#64748b;letter-spacing:0.06em">MARKET</label>
-                <select class="dash-select" id="dash-market">
-                  <option value="all" selected>All markets</option>
-                  <option value="bucket_ml">Moneyline</option>
-                  <option value="bucket_spread">Spreads</option>
-                  <option value="bucket_ou">Over / Under</option>
-                  <option value="bucket_tt">Team totals</option>
-                  <option value="bucket_special">Special</option>
-                  <option value="player_props">Player props</option>
-                </select>
-              </div>
+              <select id="dash-market" style="display:none" aria-hidden="true"><option value="all" selected>All markets</option></select>
+
               <button type="button" class="dash-settings-btn" id="dash-settings">⚙ Settings</button>
               <button type="button" class="dash-settings-btn" id="dash-stats" style="border-color:rgba(34,197,94,0.4);color:#bbf7d0" onclick="(function(){document.body.classList.add('show-stats');var p=document.getElementById('panel-stats-board');if(p){p.style.display='block';}if(window.renderBoardStats)window.renderBoardStats();else if(typeof renderBoardStats==='function')renderBoardStats();})()">Stats</button>
               
@@ -4815,7 +4805,7 @@
   };
 
   
-  var APP_VERSION = '3.13.6';
+  var APP_VERSION = '3.13.7';
   var APP_CHANGELOG = [
     {
       version: '3.13.5',
@@ -10995,7 +10985,58 @@ function kalQuery(mt, strict, allowMkt) {
     return null;
   }
 
-  function renderBoardTable(list) {
+  
+  function boardPct(v) {
+    if (v == null || v === '' || isNaN(Number(v))) return '—';
+    var n = Number(v);
+    if (n <= 1.5 && n >= 0) n = n * 100;
+    n = Math.round(n * 10) / 10;
+    return n + '%';
+  }
+  function boardEdge(g) {
+    function toPct(v) {
+      if (v == null || v === '' || isNaN(Number(v))) return null;
+      var n = Number(v);
+      if (n <= 1.5 && n >= 0) n = n * 100;
+      return n;
+    }
+    var mkt = toPct(g.market_probability != null ? g.market_probability : (g.mktPct != null ? g.mktPct : g.yesPrice));
+    var mod = toPct(g.model_probability != null ? g.model_probability : (g.fair != null ? g.fair : g.modelPct));
+    var n = null;
+    if (mkt != null && mod != null) n = mod - mkt;
+    else if (g.edgePp != null && !isNaN(Number(g.edgePp))) n = Number(g.edgePp);
+    else if (g.probability_edge != null && !isNaN(Number(g.probability_edge))) {
+      n = Number(g.probability_edge);
+      if (Math.abs(n) <= 1) n = n * 100;
+    }
+    if (n == null || isNaN(n)) return { t: '—', c: 'eo-edge-zero' };
+    if (Math.abs(n) > 25) {
+      if (mkt != null && mod != null) n = Math.max(-25, Math.min(25, mod - mkt));
+      else n = 0;
+    }
+    n = Math.round(n * 10) / 10;
+    return { t: (n >= 0 ? '+' : '') + n + 'pp', c: n > 2 ? 'eo-edge-pos' : (n < -2 ? 'eo-edge-neg' : 'eo-edge-zero') };
+  }
+  function boardMatchup(g) {
+    try {
+      if (typeof cleanBoardTitle === 'function') {
+        var t = cleanBoardTitle(g);
+        if (t && t !== '—') {
+          var lg = String(g.league || '').toUpperCase();
+          var live = g.live ? '<div class="sub">' + (lg ? lg + ' · LIVE' : 'LIVE') + '</div>' : (lg ? '<div class="sub">' + lg + '</div>' : '');
+          return '<div>' + escapeHtml(t) + '</div>' + live;
+        }
+      }
+    } catch (e) {}
+    var a = g.away || g.awayTeam || '';
+    var h = g.home || g.homeTeam || '';
+    var title = (a && h) ? (a + ' vs ' + h) : String(g.eventTitle || g.title || g.question || '—');
+    title = String(title).replace(/\bNew York G\b/gi, 'New York Giants').replace(/\bNew York J\b/gi, 'New York Jets');
+    var lg2 = String(g.league || '').toUpperCase();
+    return '<div>' + escapeHtml(title) + '</div>' + (lg2 ? '<div class="sub">' + escapeHtml(lg2) + '</div>' : '');
+  }
+
+function renderBoardTable(list) {
     applyLayoutMode();
     window.__lastBoardGames = list || [];
     var tb = $('board-tbody');
@@ -11652,8 +11693,13 @@ async function loadGames() {
       try { updateDeskStats(); renderLineShop(); } catch (e) {}
     } catch (e) {
       console.error(e);
-      if (box) box.innerHTML = '<p class="text-bb-red text-sm p-4">Load error: ' + String(e.message || e) + '</p>';
+      var msg = String(e && (e.message || e) || 'unknown');
+      if (box) box.innerHTML = '<p class="text-bb-red text-sm p-4">Load error: ' + msg.replace(/</g,'') + '</p>';
+      var tb = $('board-tbody');
+      if (tb) tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#f87171;padding:2rem">Load error: ' + msg.replace(/</g,'') + '</td></tr>';
       if ($('meta')) $('meta').textContent = 'Error';
+      if ($('board-meta')) $('board-meta').textContent = 'ERROR';
+      if ($('dash-mkt-count')) $('dash-mkt-count').textContent = '—';
     }
   }
 
@@ -15431,6 +15477,7 @@ function renderSlate() {
         if (typeof applyLayoutMode === 'function') applyLayoutMode();
         var tb = document.getElementById('board-tbody');
         if (tb) tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#94a3b8;padding:2rem">Loading markets…</td></tr>';
+        if (typeof applyLayoutMode === 'function') applyLayoutMode();
         if (typeof wireGateSliders === 'function') wireGateSliders();
         if (typeof loadGames === 'function') loadGames();
       } catch (e2) {}
